@@ -12,10 +12,13 @@
 package proxynode
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
@@ -520,6 +523,257 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 
 func (it *InsertTask) PostExecute(ctx context.Context) error {
 	return nil
+}
+
+type ColumnBasedInsertTask struct {
+	req *milvuspb.ColumnBasedInsertRequest
+	InsertTask
+}
+
+func (it *ColumnBasedInsertTask) transferColumnBasedRequestToRowBasedData() error {
+	dTypes := make([]schemapb.DataType, 0, len(it.req.FieldsData))
+	datas := make([][]interface{}, 0, len(it.req.FieldsData))
+	rowNum := 0
+
+	appendScalarField := func(getDataFunc func() interface{}) error {
+		fieldDatas := reflect.ValueOf(getDataFunc())
+		if rowNum != 0 && rowNum != fieldDatas.Len() {
+			return errors.New("the row num of different column is not equal")
+		}
+		rowNum = fieldDatas.Len()
+		datas = append(datas, make([]interface{}, 0, rowNum))
+		idx := len(datas) - 1
+		for i := 0; i < rowNum; i++ {
+			datas[idx] = append(datas[idx], fieldDatas.Index(i))
+		}
+
+		return nil
+	}
+
+	appendFloatVectorField := func(fDatas []float32, dim int64) error {
+		l := len(fDatas)
+		if int64(l)%dim != 0 {
+			return errors.New("invalid vectors")
+		}
+		r := int64(l) / dim
+		if rowNum != 0 && rowNum != int(r) {
+			return errors.New("the row num of different column is not equal")
+		}
+		rowNum = int(r)
+		datas = append(datas, make([]interface{}, 0, rowNum))
+		idx := len(datas) - 1
+		vector := make([]float32, 0, dim)
+		for i := 0; i < rowNum; i++ {
+			vector = append(vector, fDatas[i])
+			if int64(i+1)%dim == 0 {
+				datas[idx] = append(datas[idx], vector)
+				vector = make([]float32, 0, dim)
+			}
+		}
+
+		return nil
+	}
+
+	appendBinaryVectorField := func(bDatas []byte, dim int64) error {
+		l := len(bDatas)
+		if dim%8 != 0 {
+			return errors.New("invalid dim")
+		}
+		if (8*int64(l))%dim != 0 {
+			return errors.New("invalid vectors")
+		}
+		r := (8 * int64(l)) / dim
+		if rowNum != 0 && rowNum != int(r) {
+			return errors.New("the row num of different column is not equal")
+		}
+		rowNum = int(r)
+		datas = append(datas, make([]interface{}, 0, rowNum))
+		idx := len(datas) - 1
+		vector := make([]byte, 0, dim)
+		for i := 0; i < rowNum; i++ {
+			vector = append(vector, bDatas[i])
+			if (8*int64(i+1))%dim == 0 {
+				datas[idx] = append(datas[idx], vector)
+				vector = make([]byte, 0, dim)
+			}
+		}
+
+		return nil
+	}
+
+	for _, field := range it.req.FieldsData {
+		switch field.Field.(type) {
+		case *schemapb.FieldData_Scalars:
+			scalarField := field.GetScalars()
+			switch scalarField.Data.(type) {
+			case *schemapb.ScalarField_BoolData:
+				err := appendScalarField(func() interface{} {
+					return scalarField.GetBoolData().Data
+				})
+				if err != nil {
+					return err
+				}
+			case *schemapb.ScalarField_IntData:
+				err := appendScalarField(func() interface{} {
+					return scalarField.GetIntData().Data
+				})
+				if err != nil {
+					return err
+				}
+			case *schemapb.ScalarField_LongData:
+				err := appendScalarField(func() interface{} {
+					return scalarField.GetLongData().Data
+				})
+				if err != nil {
+					return err
+				}
+			case *schemapb.ScalarField_FloatData:
+				err := appendScalarField(func() interface{} {
+					return scalarField.GetFloatData().Data
+				})
+				if err != nil {
+					return err
+				}
+			case *schemapb.ScalarField_DoubleData:
+				err := appendScalarField(func() interface{} {
+					return scalarField.GetDoubleData().Data
+				})
+				if err != nil {
+					return err
+				}
+			case *schemapb.ScalarField_BytesData:
+				return errors.New("bytes field is not supported now")
+			case *schemapb.ScalarField_StringData:
+				return errors.New("string field is not supported now")
+			case nil:
+				continue
+			default:
+				continue
+			}
+		case *schemapb.FieldData_Vectors:
+			vectorField := field.GetVectors()
+			switch vectorField.Data.(type) {
+			case *schemapb.VectorField_FloatVector:
+				floatVectorFieldData := vectorField.GetFloatVector().Data
+				dim := vectorField.GetDim()
+				err := appendFloatVectorField(floatVectorFieldData, dim)
+				if err != nil {
+					return err
+				}
+			case *schemapb.VectorField_BinaryVector:
+				binaryVectorFieldData := vectorField.GetBinaryVector()
+				dim := vectorField.GetDim()
+				err := appendBinaryVectorField(binaryVectorFieldData, dim)
+				if err != nil {
+					return err
+				}
+			case nil:
+				continue
+			default:
+				continue
+			}
+		case nil:
+			continue
+		default:
+			continue
+		}
+
+		dTypes = append(dTypes, field.Type)
+	}
+
+	it.RowData = make([]*commonpb.Blob, 0, rowNum)
+	l := len(dTypes)
+	// TODO(dragondriver): big endian or little endian?
+	endian := binary.LittleEndian
+	for i := 0; i < rowNum; i++ {
+		blob := &commonpb.Blob{
+			Value: make([]byte, 0),
+		}
+
+		for j := 0; j < l; j++ {
+			var buffer bytes.Buffer
+			switch dTypes[j] {
+			case schemapb.DataType_Bool:
+				d := datas[i][j].(bool)
+				err := binary.Write(&buffer, endian, d)
+				if err != nil {
+					log.Warn("ConvertData", zap.Error(err))
+				}
+				blob.Value = append(blob.Value, buffer.Bytes()...)
+			case schemapb.DataType_Int8:
+				d := datas[i][j].(int8)
+				err := binary.Write(&buffer, endian, d)
+				if err != nil {
+					log.Warn("ConvertData", zap.Error(err))
+				}
+				blob.Value = append(blob.Value, buffer.Bytes()...)
+			case schemapb.DataType_Int16:
+				d := datas[i][j].(int16)
+				err := binary.Write(&buffer, endian, d)
+				if err != nil {
+					log.Warn("ConvertData", zap.Error(err))
+				}
+				blob.Value = append(blob.Value, buffer.Bytes()...)
+			case schemapb.DataType_Int32:
+				d := datas[i][j].(int32)
+				err := binary.Write(&buffer, endian, d)
+				if err != nil {
+					log.Warn("ConvertData", zap.Error(err))
+				}
+				blob.Value = append(blob.Value, buffer.Bytes()...)
+			case schemapb.DataType_Int64:
+				d := datas[i][j].(int64)
+				err := binary.Write(&buffer, endian, d)
+				if err != nil {
+					log.Warn("ConvertData", zap.Error(err))
+				}
+				blob.Value = append(blob.Value, buffer.Bytes()...)
+			case schemapb.DataType_Float:
+				d := datas[i][j].(float32)
+				err := binary.Write(&buffer, endian, d)
+				if err != nil {
+					log.Warn("ConvertData", zap.Error(err))
+				}
+				blob.Value = append(blob.Value, buffer.Bytes()...)
+			case schemapb.DataType_Double:
+				d := datas[i][j].(float64)
+				err := binary.Write(&buffer, endian, d)
+				if err != nil {
+					log.Warn("ConvertData", zap.Error(err))
+				}
+				blob.Value = append(blob.Value, buffer.Bytes()...)
+			case schemapb.DataType_FloatVector:
+				d := datas[i][j].([]float32)
+				err := binary.Write(&buffer, endian, d)
+				if err != nil {
+					log.Warn("ConvertData", zap.Error(err))
+				}
+				blob.Value = append(blob.Value, buffer.Bytes()...)
+			case schemapb.DataType_BinaryVector:
+				d := datas[i][j].([]byte)
+				err := binary.Write(&buffer, endian, d)
+				if err != nil {
+					log.Warn("ConvertData", zap.Error(err))
+				}
+				blob.Value = append(blob.Value, buffer.Bytes()...)
+			default:
+				log.Warn("unsupported data type")
+			}
+		}
+
+		it.RowData = append(it.RowData, blob)
+	}
+
+	return nil
+}
+
+func (it *ColumnBasedInsertTask) PreExecute(ctx context.Context) error {
+	err := it.transferColumnBasedRequestToRowBasedData()
+	if err != nil {
+		return err
+	}
+
+	return it.InsertTask.PreExecute(ctx)
 }
 
 type CreateCollectionTask struct {

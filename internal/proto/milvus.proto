@@ -31,6 +31,7 @@ service MilvusService {
   rpc DropIndex(DropIndexRequest) returns (common.Status) {}
 
   rpc Insert(InsertRequest) returns (InsertResponse) {}
+  rpc ColumnBasedInsert(ColumnBasedInsertRequest) returns (InsertResponse) {}
   rpc Search(SearchRequest) returns (SearchResults) {}
   rpc Retrieve(RetrieveRequest) returns (RetrieveResults) {}
   rpc Flush(FlushRequest) returns (common.Status) {}
@@ -271,6 +272,15 @@ message DropIndexRequest {
   string collection_name = 3; // must
   string field_name = 4;
   string index_name = 5; // No need to set up for now @2021.06.30
+}
+
+message ColumnBasedInsertRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string collection_name = 3;
+  string partition_name = 4;
+  repeated schema.FieldData fields_data = 5;
+  repeated uint32 hash_keys = 6;
 }
 
 message InsertRequest {

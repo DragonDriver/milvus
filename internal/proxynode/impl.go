@@ -1113,6 +1113,83 @@ func (node *ProxyNode) Insert(ctx context.Context, request *milvuspb.InsertReque
 	return it.result, nil
 }
 
+func (node *ProxyNode) ColumnBasedInsert(ctx context.Context, request *milvuspb.ColumnBasedInsertRequest) (*milvuspb.InsertResponse, error) {
+	it := &ColumnBasedInsertTask{
+		req: request,
+		InsertTask: InsertTask{
+			ctx:         ctx,
+			Condition:   NewTaskCondition(ctx),
+			dataService: node.dataService,
+			BaseInsertTask: BaseInsertTask{
+				BaseMsg: msgstream.BaseMsg{
+					HashValues: request.HashKeys,
+				},
+				InsertRequest: internalpb.InsertRequest{
+					Base: &commonpb.MsgBase{
+						MsgType: commonpb.MsgType_Insert,
+						MsgID:   0,
+					},
+					CollectionName: request.CollectionName,
+					PartitionName:  request.PartitionName,
+					// transfer column-based request to row-based row-data
+				},
+			},
+			rowIDAllocator: node.idAllocator,
+			segIDAssigner:  node.segAssigner,
+			chMgr:          node.chMgr,
+			chTicker:       node.chTicker,
+		},
+	}
+	if len(it.PartitionName) <= 0 {
+		it.PartitionName = Params.DefaultPartitionName
+	}
+
+	err := node.sched.DmQueue.Enqueue(it)
+
+	if err != nil {
+		return &milvuspb.InsertResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	log.Debug("ColumnBasedInsert",
+		zap.String("role", Params.RoleName),
+		zap.Int64("msgID", it.BaseInsertTask.InsertRequest.Base.MsgID),
+		zap.Uint64("timestamp", it.BaseInsertTask.InsertRequest.Base.Timestamp),
+		zap.String("db", request.DbName),
+		zap.String("collection", request.CollectionName),
+		zap.String("partition", request.PartitionName),
+		zap.Any("len(RowData)", len(it.RowData)),
+		zap.Any("len(RowIDs)", len(it.RowIDs)))
+	defer func() {
+		log.Debug("ColumnBasedInsert Done",
+			zap.Error(err),
+			zap.String("role", Params.RoleName),
+			zap.Int64("msgID", it.BaseInsertTask.InsertRequest.Base.MsgID),
+			zap.Uint64("timestamp", it.BaseInsertTask.InsertRequest.Base.Timestamp),
+			zap.String("db", request.DbName),
+			zap.String("collection", request.CollectionName),
+			zap.String("partition", request.PartitionName),
+			zap.Any("len(RowData)", len(it.RowData)),
+			zap.Any("len(RowIDs)", len(it.RowIDs)))
+	}()
+
+	err = it.WaitToFinish()
+	if err != nil {
+		return &milvuspb.InsertResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    err.Error(),
+			},
+		}, nil
+	}
+
+	return it.result, nil
+}
+
 func (node *ProxyNode) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	qt := &SearchTask{
 		ctx:       ctx,

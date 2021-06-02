@@ -374,6 +374,10 @@ func (s *Server) Insert(ctx context.Context, request *milvuspb.InsertRequest) (*
 	return s.proxynode.Insert(ctx, request)
 }
 
+func (s *Server) ColumnBasedInsert(ctx context.Context, request *milvuspb.ColumnBasedInsertRequest) (*milvuspb.InsertResponse, error) {
+	return s.proxynode.ColumnBasedInsert(ctx, request)
+}
+
 func (s *Server) Search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
 	return s.proxynode.Search(ctx, request)
 }

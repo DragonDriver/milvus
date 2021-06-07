@@ -166,15 +166,6 @@ func ValidateDuplicatedFieldName(fields []*schemapb.FieldSchema) error {
 }
 
 func ValidatePrimaryKey(coll *schemapb.CollectionSchema) error {
-	//no primary key for auto id
-	if coll.AutoID {
-		for _, field := range coll.Fields {
-			if field.IsPrimaryKey {
-				return fmt.Errorf("collection %s is auto id, so field %s should not defined as primary key", coll.Name, field.Name)
-			}
-		}
-		return nil
-	}
 	idx := -1
 	for i, field := range coll.Fields {
 		if field.IsPrimaryKey {

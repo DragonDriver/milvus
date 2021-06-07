@@ -619,6 +619,54 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 	return newPack, nil
 }
 
+func getDim(f *schemapb.FieldSchema) (int, error) {
+	dimStr, err := GetAttrByKeyFromRepeatedKV("dim", f.TypeParams)
+	if err == nil {
+		dim, err1 := strconv.Atoi(dimStr)
+		if err1 == nil {
+			return dim, nil
+		}
+	}
+
+	dimStr, err = GetAttrByKeyFromRepeatedKV("dim", f.IndexParams)
+	if err == nil {
+		dim, err1 := strconv.Atoi(dimStr)
+		if err1 == nil {
+			return dim, nil
+		}
+	}
+
+	paramsStr, err := GetAttrByKeyFromRepeatedKV("params", f.TypeParams)
+	if err == nil {
+		m, err1 := funcutil.ParseIndexParamsMap(paramsStr)
+		if err1 == nil {
+			dimStr, ok := m["dim"]
+			if ok {
+				dim, err1 := strconv.Atoi(dimStr)
+				if err1 == nil {
+					return dim, nil
+				}
+			}
+		}
+	}
+
+	paramsStr, err = GetAttrByKeyFromRepeatedKV("params", f.IndexParams)
+	if err == nil {
+		m, err1 := funcutil.ParseIndexParamsMap(paramsStr)
+		if err1 == nil {
+			dimStr, ok := m["dim"]
+			if ok {
+				dim, err1 := strconv.Atoi(dimStr)
+				if err1 == nil {
+					return dim, nil
+				}
+			}
+		}
+	}
+
+	return 0, errors.New("dim not found in params")
+}
+
 func (it *InsertTask) Execute(ctx context.Context) error {
 	collectionName := it.BaseInsertTask.CollectionName
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
@@ -626,7 +674,6 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	autoID := collSchema.AutoID
 	collID, err := globalMetaCache.GetCollectionID(ctx, collectionName)
 	if err != nil {
 		return err
@@ -645,6 +692,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		}
 	}
 	it.PartitionID = partitionID
+
 	var rowIDBegin UniqueID
 	var rowIDEnd UniqueID
 	rowNums := len(it.BaseInsertTask.RowData)
@@ -656,13 +704,65 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		it.BaseInsertTask.RowIDs[offset] = i
 	}
 
-	if autoID {
-		if it.HashValues == nil || len(it.HashValues) == 0 {
-			it.HashValues = make([]uint32, 0)
+	offset := 0
+	binaryRowIDs := make([][]byte, 0, len(it.RowIDs))
+	autoID := false
+	primaryKeys := make([]int64, 0, len(it.RowIDs))
+	for idx, field := range collSchema.Fields {
+		if field.IsPrimaryKey && len(primaryKeys) > 0 {
+			return errors.New("duplicated primary key found")
+		} else if field.IsPrimaryKey && !field.AutoID {
+			if it.req.FieldsData[idx].Type != schemapb.DataType_Int64 {
+				return errors.New("int64 is the only supported type of primary key")
+			}
+			primaryKeys = it.req.FieldsData[idx].GetScalars().GetLongData().Data
+		} else if field.AutoID {
+			if it.HashValues == nil || len(it.HashValues) == 0 {
+				it.HashValues = make([]uint32, 0)
+			}
+			for _, rowID := range it.RowIDs {
+				if field.IsPrimaryKey && len(primaryKeys) < rowNums {
+					primaryKeys = append(primaryKeys, rowID)
+				}
+				if field.IsPrimaryKey && len(it.HashValues) < rowNums {
+					hashValue, _ := typeutil.Hash32Int64(rowID)
+					it.HashValues = append(it.HashValues, hashValue)
+				}
+				var buffer bytes.Buffer
+				_ = binary.Write(&buffer, binary.LittleEndian, rowID)
+				binaryRowIDs = append(binaryRowIDs, buffer.Bytes())
+			}
+			autoID = true
+			break
 		}
-		for _, rowID := range it.RowIDs {
-			hashValue, _ := typeutil.Hash32Int64(rowID)
-			it.HashValues = append(it.HashValues, hashValue)
+		switch field.DataType {
+		case schemapb.DataType_Bool:
+			offset += int(unsafe.Sizeof(false))
+		case schemapb.DataType_Int8:
+			offset += int(unsafe.Sizeof(int8(0)))
+		case schemapb.DataType_Int16:
+			offset += int(unsafe.Sizeof(int16(0)))
+		case schemapb.DataType_Int32:
+			offset += int(unsafe.Sizeof(int32(0)))
+		case schemapb.DataType_Int64:
+			offset += int(unsafe.Sizeof(int64(0)))
+		case schemapb.DataType_Float:
+			offset += int(unsafe.Sizeof(float32(0)))
+		case schemapb.DataType_Double:
+			offset += int(unsafe.Sizeof(float64(0)))
+		case schemapb.DataType_FloatVector:
+			dim, _ := getDim(field)
+			offset += int(unsafe.Sizeof(float32(0))) * dim
+		case schemapb.DataType_BinaryVector:
+			dim, _ := getDim(field)
+			offset += dim / 8
+		}
+	}
+
+	// insert row id to row data
+	if autoID {
+		for i := range it.RowData {
+			it.RowData[i].Value = append(it.RowData[i].Value[:offset], append(binaryRowIDs[i], it.RowData[i].Value[offset:]...)...)
 		}
 	}
 
@@ -678,8 +778,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 		Status: &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_Success,
 		},
-		RowIDBegin: rowIDBegin,
-		RowIDEnd:   rowIDEnd,
+		PrimaryKeys: primaryKeys,
 	}
 
 	msgPack.Msgs[0] = tsMsg
@@ -788,6 +887,8 @@ func (cct *CreateCollectionTask) PreExecute(ctx context.Context) error {
 
 	cct.schema = &schemapb.CollectionSchema{}
 	err := proto.Unmarshal(cct.Schema, cct.schema)
+	cct.schema.AutoID = false
+	cct.CreateCollectionRequest.Schema, _ = proto.Marshal(cct.schema)
 	if err != nil {
 		return err
 	}

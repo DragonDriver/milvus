@@ -6442,10 +6442,20 @@ class InsertResponse :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kPrimaryKeysFieldNumber = 2,
     kStatusFieldNumber = 1,
-    kRowIDBeginFieldNumber = 2,
-    kRowIDEndFieldNumber = 3,
   };
+  // repeated int64 primary_keys = 2;
+  int primary_keys_size() const;
+  void clear_primary_keys();
+  ::PROTOBUF_NAMESPACE_ID::int64 primary_keys(int index) const;
+  void set_primary_keys(int index, ::PROTOBUF_NAMESPACE_ID::int64 value);
+  void add_primary_keys(::PROTOBUF_NAMESPACE_ID::int64 value);
+  const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+      primary_keys() const;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+      mutable_primary_keys();
+
   // .milvus.proto.common.Status status = 1;
   bool has_status() const;
   void clear_status();
@@ -6454,24 +6464,14 @@ class InsertResponse :
   ::milvus::proto::common::Status* mutable_status();
   void set_allocated_status(::milvus::proto::common::Status* status);
 
-  // int64 rowID_begin = 2;
-  void clear_rowid_begin();
-  ::PROTOBUF_NAMESPACE_ID::int64 rowid_begin() const;
-  void set_rowid_begin(::PROTOBUF_NAMESPACE_ID::int64 value);
-
-  // int64 rowID_end = 3;
-  void clear_rowid_end();
-  ::PROTOBUF_NAMESPACE_ID::int64 rowid_end() const;
-  void set_rowid_end(::PROTOBUF_NAMESPACE_ID::int64 value);
-
   // @@protoc_insertion_point(class_scope:milvus.proto.milvus.InsertResponse)
  private:
   class _Internal;
 
   ::PROTOBUF_NAMESPACE_ID::internal::InternalMetadataWithArena _internal_metadata_;
+  ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 > primary_keys_;
+  mutable std::atomic<int> _primary_keys_cached_byte_size_;
   ::milvus::proto::common::Status* status_;
-  ::PROTOBUF_NAMESPACE_ID::int64 rowid_begin_;
-  ::PROTOBUF_NAMESPACE_ID::int64 rowid_end_;
   mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   friend struct ::TableStruct_milvus_2eproto;
 };
@@ -15489,32 +15489,34 @@ inline void InsertResponse::set_allocated_status(::milvus::proto::common::Status
   // @@protoc_insertion_point(field_set_allocated:milvus.proto.milvus.InsertResponse.status)
 }
 
-// int64 rowID_begin = 2;
-inline void InsertResponse::clear_rowid_begin() {
-  rowid_begin_ = PROTOBUF_LONGLONG(0);
+// repeated int64 primary_keys = 2;
+inline int InsertResponse::primary_keys_size() const {
+  return primary_keys_.size();
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 InsertResponse::rowid_begin() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.InsertResponse.rowID_begin)
-  return rowid_begin_;
+inline void InsertResponse::clear_primary_keys() {
+  primary_keys_.Clear();
 }
-inline void InsertResponse::set_rowid_begin(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  
-  rowid_begin_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.InsertResponse.rowID_begin)
+inline ::PROTOBUF_NAMESPACE_ID::int64 InsertResponse::primary_keys(int index) const {
+  // @@protoc_insertion_point(field_get:milvus.proto.milvus.InsertResponse.primary_keys)
+  return primary_keys_.Get(index);
 }
-
-// int64 rowID_end = 3;
-inline void InsertResponse::clear_rowid_end() {
-  rowid_end_ = PROTOBUF_LONGLONG(0);
+inline void InsertResponse::set_primary_keys(int index, ::PROTOBUF_NAMESPACE_ID::int64 value) {
+  primary_keys_.Set(index, value);
+  // @@protoc_insertion_point(field_set:milvus.proto.milvus.InsertResponse.primary_keys)
 }
-inline ::PROTOBUF_NAMESPACE_ID::int64 InsertResponse::rowid_end() const {
-  // @@protoc_insertion_point(field_get:milvus.proto.milvus.InsertResponse.rowID_end)
-  return rowid_end_;
+inline void InsertResponse::add_primary_keys(::PROTOBUF_NAMESPACE_ID::int64 value) {
+  primary_keys_.Add(value);
+  // @@protoc_insertion_point(field_add:milvus.proto.milvus.InsertResponse.primary_keys)
 }
-inline void InsertResponse::set_rowid_end(::PROTOBUF_NAMESPACE_ID::int64 value) {
-  
-  rowid_end_ = value;
-  // @@protoc_insertion_point(field_set:milvus.proto.milvus.InsertResponse.rowID_end)
+inline const ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >&
+InsertResponse::primary_keys() const {
+  // @@protoc_insertion_point(field_list:milvus.proto.milvus.InsertResponse.primary_keys)
+  return primary_keys_;
+}
+inline ::PROTOBUF_NAMESPACE_ID::RepeatedField< ::PROTOBUF_NAMESPACE_ID::int64 >*
+InsertResponse::mutable_primary_keys() {
+  // @@protoc_insertion_point(field_mutable_list:milvus.proto.milvus.InsertResponse.primary_keys)
+  return &primary_keys_;
 }
 
 // -------------------------------------------------------------------

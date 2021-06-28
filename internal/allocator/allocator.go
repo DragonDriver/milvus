@@ -168,12 +168,18 @@ func (ta *Allocator) mainLoop() {
 				ta.ToDoReqs = append(ta.ToDoReqs, <-ta.Reqs)
 			}
 			ta.pickCanDo()
+			log.Debug("fuck pickCanDo")
 			ta.finishRequest()
+			log.Debug("fuck finishRequest")
 			if ta.sync(false) {
+				log.Debug("fuck sync")
 				ta.pickCanDo()
+				log.Debug("fuck pickCanDo again")
 				ta.finishRequest()
+				log.Debug("fuck finishRequest again")
 			}
 			ta.failRemainRequest()
+			log.Debug("fuck failRemainRequest")
 
 		case <-loopCtx.Done():
 			return
@@ -244,6 +250,7 @@ func (ta *Allocator) finishRequest() {
 	for _, req := range ta.CanDoReqs {
 		if req != nil {
 			err := ta.ProcessFunc(req)
+			log.Debug("fuck process func req")
 			req.Notify(err)
 		}
 	}

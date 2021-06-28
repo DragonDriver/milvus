@@ -346,10 +346,13 @@ func (sa *SegIDAssigner) syncSegments() (bool, error) {
 func (sa *SegIDAssigner) processFunc(req allocator.Request) error {
 	segRequest := req.(*segRequest)
 	assign, err := sa.getAssign(segRequest.collID, segRequest.partitionID, segRequest.channelName)
+	log.Debug("fuck get assign")
 	if err != nil {
+		log.Debug("fuck get assign err", zap.Error(err))
 		return err
 	}
 	result, err := assign.Assign(segRequest.timestamp, segRequest.count)
+	log.Debug("fuck assign.Assign")
 	segRequest.segInfo = result
 	return err
 }

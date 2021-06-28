@@ -596,30 +596,40 @@ func (it *InsertTask) PreExecute(ctx context.Context) error {
 
 	collectionName := it.BaseInsertTask.CollectionName
 	if err := ValidateCollectionName(collectionName); err != nil {
+		log.Debug("Failed to validate collection name", zap.Error(err))
 		return err
 	}
+	log.Debug("Success to validate collection name")
 
 	partitionTag := it.BaseInsertTask.PartitionName
 	if err := ValidatePartitionTag(partitionTag, true); err != nil {
+		log.Debug("Failed to validate partition tag", zap.Error(err))
 		return err
 	}
+	log.Debug("Success to validate partition tag")
 
 	collSchema, err := globalMetaCache.GetCollectionSchema(ctx, collectionName)
 	log.Debug("Proxy Insert PreExecute", zap.Any("collSchema", collSchema))
 	if err != nil {
+		log.Debug("Failed to get collection schema", zap.Error(err))
 		return err
 	}
 	it.schema = collSchema
+	log.Debug("Success to get collection schema")
 
 	err = it.checkFieldAutoID()
 	if err != nil {
+		log.Debug("Failed to check field auto id", zap.Error(err))
 		return err
 	}
+	log.Debug("Success to check field auto id")
 
 	err = it.transferColumnBasedRequestToRowBasedData()
 	if err != nil {
+		log.Debug("Failed to transform request", zap.Error(err))
 		return err
 	}
+	log.Debug("Success to transform request")
 
 	rowNum := len(it.RowData)
 	it.Timestamps = make([]uint64, rowNum)
@@ -680,6 +690,8 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 	}
 
+	log.Debug("Success to initialize segment id map")
+
 	reqSegCountMap := make(map[int32]map[UniqueID]uint32)
 
 	for channelID, count := range channelCountMap {
@@ -694,12 +706,16 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 		}
 		mapInfo, err := it.segIDAssigner.GetSegmentID(it.CollectionID, it.PartitionID, channelName, count, ts)
 		if err != nil {
+			log.Debug("Failed to get segment id", zap.Error(err))
 			return nil, err
 		}
+		log.Debug("fuck get segment id")
 		reqSegCountMap[channelID] = make(map[UniqueID]uint32)
 		reqSegCountMap[channelID] = mapInfo
 		log.Debug("Proxy", zap.Int64("repackFunc, reqSegCountMap, reqID", reqID), zap.Any("mapinfo", mapInfo))
 	}
+
+	log.Debug("Success to get segment id")
 
 	reqSegAccumulateCountMap := make(map[int32][]uint32)
 	reqSegIDMap := make(map[int32][]UniqueID)
@@ -733,6 +749,8 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 			)
 		}
 	}
+
+	log.Debug("fuck 111111111111")
 
 	var getSegmentID = func(channelID int32) UniqueID {
 		reqSegAllocateCounter[channelID]++
@@ -829,11 +847,16 @@ func (it *InsertTask) _assignSegmentID(stream msgstream.MsgStream, pack *msgstre
 			curMsgSizeMap[key] = curMsgSize
 		}
 	}
+
+	log.Debug("fuck 222222222222")
+
 	for _, msg := range result {
 		if msg != nil {
 			newPack.Msgs = append(newPack.Msgs, msg)
 		}
 	}
+
+	log.Debug("fuck 333333333333")
 
 	return newPack, nil
 }
@@ -857,6 +880,7 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 			return err
 		}
 	}
+	log.Debug("Success to get partition id")
 	it.PartitionID = partitionID
 
 	var tsMsg msgstream.TsMsg = &it.BaseInsertTask
@@ -871,42 +895,55 @@ func (it *InsertTask) Execute(ctx context.Context) error {
 
 	stream, err := it.chMgr.getDMLStream(collID)
 	if err != nil {
+		log.Debug("no dml stream", zap.Any("collID", collID))
 		err = it.chMgr.createDMLMsgStream(collID)
 		if err != nil {
+			log.Debug("Failed to create dml stream", zap.Error(err))
 			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			it.result.Status.Reason = err.Error()
 			return err
 		}
+		log.Debug("Success to create dml stream", zap.Error(err))
 		stream, err = it.chMgr.getDMLStream(collID)
 		if err != nil {
+			log.Debug("Failed to get dml stream", zap.Error(err))
 			it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 			it.result.Status.Reason = err.Error()
 			return err
 		}
+		log.Debug("Success to get dml stream")
 	}
+	log.Debug("Success to get dml stream", zap.Error(err))
 
 	pchans, err := it.chMgr.getChannels(collID)
 	if err != nil {
+		log.Debug("Failed to get channels", zap.Error(err))
 		return err
 	}
+	log.Debug("Success to get channels", zap.Error(err))
 	for _, pchan := range pchans {
 		log.Debug("Proxy InsertTask add pchan", zap.Any("pchan", pchan))
 		_ = it.chTicker.addPChan(pchan)
 	}
+	log.Debug("Success to add pchan to time ticker")
 
 	// Assign SegmentID
 	var pack *msgstream.MsgPack
 	pack, err = it._assignSegmentID(stream, &msgPack)
 	if err != nil {
+		log.Debug("Failed to assign segment id", zap.Error(err))
 		return err
 	}
+	log.Debug("Success to assign segment id")
 
 	err = stream.Produce(pack)
 	if err != nil {
+		log.Debug("Failed to produce msg to stream", zap.Error(err))
 		it.result.Status.ErrorCode = commonpb.ErrorCode_UnexpectedError
 		it.result.Status.Reason = err.Error()
 		return err
 	}
+	log.Debug("Success to produce msg to stream")
 
 	return nil
 }
